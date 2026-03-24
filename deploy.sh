@@ -202,8 +202,8 @@ if [[ "$MODE" == "paper" ]]; then
         echo "Copy .env.example to .env and fill in your Alpaca credentials"
         exit 1
     fi
-    # Quick check for placeholder values
-    if grep -q "your_alpaca_api_key_here" .env 2>/dev/null; then
+    # Quick check for placeholder values (only check main account keys)
+    if grep -q "^APCA_API_KEY=your_alpaca_api_key_here" .env 2>/dev/null; then
         echo "Error: Alpaca API credentials not configured in .env"
         echo "Set APCA_API_KEY and APCA_API_SECRET to your actual keys"
         exit 1
@@ -376,7 +376,8 @@ preprocessor.load_and_prepare(data_dir=data_dir)
 engine = AdaptiveRotationEngine(config=config_path, data_preprocessor=preprocessor)
 config = engine.get_config()
 
-price_data = preprocessor.get_as_of_date(as_of_date)
+raw_data = preprocessor.get_data_as_of(as_of_date)
+price_data = {symbol: df['close'] for symbol, df in raw_data.items()}
 
 weights, audit_log = engine.run(
     price_data=price_data,
@@ -458,17 +459,23 @@ result = manager.execute_portfolio_rebalance(
 )
 
 print(f"\n  {'[DRY RUN] ' if dry_run else ''}Rebalance result:")
-if dry_run:
+if dry_run or result.get("orders_plan"):
     orders_plan = result.get("orders_plan", result)
     print(f"    Plan: {json.dumps(orders_plan, indent=4, default=str)}")
 else:
-    orders = result.get("orders_placed", [])
-    print(f"    Orders placed: {len(orders)}")
+    n_placed = result.get("orders_placed", 0)
+    orders = result.get("orders", [])
+    print(f"    Orders placed: {n_placed}")
     for o in orders:
-        side = o.get("side", "?")
-        sym = o.get("symbol", "?")
-        qty = o.get("qty", "?")
-        print(f"      {side.upper():5s} {sym:8s} x {qty}")
+        if isinstance(o, dict):
+            side = o.get("side", "?")
+            sym = o.get("symbol", "?")
+            qty = o.get("qty", o.get("quantity", "?"))
+        else:
+            side = getattr(o, "side", "?")
+            sym = getattr(o, "symbol", "?")
+            qty = getattr(o, "qty", getattr(o, "quantity", "?"))
+        print(f"      {str(side).upper():5s} {sym:8s} x {qty}")
 
 # Save execution log
 exec_file = output_dir / f"execution_{as_of_date}.json"

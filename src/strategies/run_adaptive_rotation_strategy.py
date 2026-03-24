@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
+import numpy as np
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -54,8 +55,9 @@ def run_single_date(config_path: str, as_of_date: str, data_dir: str = None):
     config = engine.get_config()
     
     # Get data as of the decision date
-    price_data = preprocessor.get_as_of_date(as_of_date)
-    
+    raw_data = preprocessor.get_data_as_of(as_of_date)
+    price_data = {symbol: df['close'] for symbol, df in raw_data.items()}
+
     print(f"   - Loaded {len(price_data)} assets")
     print(f"   - Data range: {min(s.index.min() for s in price_data.values())} to {as_of_date}")
     
@@ -402,8 +404,185 @@ def run_backtest(config_path: str, start_date: str, end_date: str,
             r['audit'].to_json(str(audit_file))
         
         print(f"Audit logs saved to: {audit_dir}")
-    
+
+        # 6. Performance analysis & equity curve
+        _generate_performance_report(
+            weights_detail_df, start_date, end_date,
+            data_dir or str(config.paths.data_root), weights_dir
+        )
+
     return results
+
+
+def _generate_performance_report(weights_df, start_date, end_date, data_dir, output_dir):
+    """Generate performance metrics and equity curve chart after backtest."""
+
+    print(f"\n{'='*60}")
+    print("Performance Analysis")
+    print(f"{'='*60}")
+
+    weights_df = weights_df.copy()
+    weights_df['date'] = pd.to_datetime(weights_df['date'])
+
+    meta_cols = ['date', 'cash', 'regime']
+    asset_cols = [c for c in weights_df.columns if c not in meta_cols]
+
+    # Load daily prices
+    data_path = Path(data_dir)
+    prices = {}
+    for sym in asset_cols:
+        csv_path = data_path / f"{sym}_daily.csv"
+        if csv_path.exists():
+            df = pd.read_csv(csv_path)
+            df['date'] = pd.to_datetime(df['date'])
+            prices[sym] = df.set_index('date')['close']
+
+    price_df = pd.DataFrame(prices)
+    dates = weights_df['date'].values
+
+    # Calculate portfolio value week-by-week
+    portfolio_values = [1.0]
+    for i in range(len(dates) - 1):
+        d0, d1 = pd.Timestamp(dates[i]), pd.Timestamp(dates[i + 1])
+        row = weights_df.iloc[i]
+        period_return = 0.0
+        for sym in asset_cols:
+            w = row[sym]
+            if w > 0 and sym in price_df.columns:
+                p0_s = price_df[sym].loc[:d0].dropna()
+                p1_s = price_df[sym].loc[:d1].dropna()
+                if len(p0_s) > 0 and len(p1_s) > 0:
+                    period_return += w * (p1_s.iloc[-1] / p0_s.iloc[-1] - 1)
+        portfolio_values.append(portfolio_values[-1] * (1 + period_return))
+
+    equity = pd.DataFrame({'date': pd.to_datetime(dates), 'portfolio': portfolio_values}).set_index('date')
+
+    # Benchmarks
+    for bench in ['SPY', 'QQQ']:
+        csv_path = data_path / f"{bench}_daily.csv"
+        if csv_path.exists():
+            df = pd.read_csv(csv_path)
+            df['date'] = pd.to_datetime(df['date'])
+            series = df.set_index('date')['close']
+            start_price = series.loc[:equity.index[0]].iloc[-1]
+            equity[bench] = series.reindex(equity.index, method='ffill') / start_price
+
+    # Metrics
+    total_ret = equity['portfolio'].iloc[-1] - 1
+    years = (equity.index[-1] - equity.index[0]).days / 365.25
+    ann_ret = (1 + total_ret) ** (1 / years) - 1
+    weekly_rets = equity['portfolio'].pct_change().dropna()
+    ann_vol = weekly_rets.std() * np.sqrt(52)
+    sharpe = ann_ret / ann_vol if ann_vol > 0 else 0
+    cummax = equity['portfolio'].cummax()
+    drawdown = (equity['portfolio'] - cummax) / cummax
+    max_dd = drawdown.min()
+    calmar = ann_ret / abs(max_dd) if max_dd != 0 else 0
+    win_rate = (weekly_rets > 0).sum() / len(weekly_rets)
+
+    # Print results table
+    header = f"{'Metric':<25s} {'Strategy':>12s}"
+    divider = "-" * 40
+    for bench in ['SPY', 'QQQ']:
+        if bench in equity.columns:
+            header += f" {bench:>10s}"
+            divider += "-" * 11
+
+    print(f"\n{header}")
+    print(divider)
+
+    def _bench_metric(bench, metric_fn):
+        if bench in equity.columns:
+            return f" {metric_fn(bench):>10s}"
+        return ""
+
+    def _cum_ret(b):
+        return f"{equity[b].iloc[-1]:.2f}x"
+    def _ann_ret(b):
+        r = equity[b].iloc[-1] - 1
+        return f"{((1+r)**(1/years)-1):.2%}"
+    def _ann_vol(b):
+        return f"{equity[b].pct_change().dropna().std() * np.sqrt(52):.2%}"
+    def _sharpe_b(b):
+        r = equity[b].iloc[-1] - 1
+        ar = (1+r)**(1/years)-1
+        av = equity[b].pct_change().dropna().std() * np.sqrt(52)
+        return f"{ar/av:.2f}" if av > 0 else "N/A"
+    def _max_dd_b(b):
+        cm = equity[b].cummax()
+        return f"{((equity[b]-cm)/cm).min():.2%}"
+
+    rows = [
+        ("Cumulative Return", f"{equity['portfolio'].iloc[-1]:.2f}x", _cum_ret),
+        ("Annualized Return", f"{ann_ret:.2%}", _ann_ret),
+        ("Annualized Volatility", f"{ann_vol:.2%}", _ann_vol),
+        ("Sharpe Ratio", f"{sharpe:.2f}", _sharpe_b),
+        ("Max Drawdown", f"{max_dd:.2%}", _max_dd_b),
+        ("Calmar Ratio", f"{calmar:.2f}", None),
+        ("Win Rate", f"{win_rate:.2%}", None),
+    ]
+
+    for label, val, bench_fn in rows:
+        line = f"{label:<25s} {val:>12s}"
+        if bench_fn:
+            for b in ['SPY', 'QQQ']:
+                line += _bench_metric(b, bench_fn)
+        print(line)
+
+    # Plot
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 9), height_ratios=[3, 1], sharex=True)
+        fig.suptitle(
+            f'Adaptive Rotation Strategy \u2014 Backtest ({start_date} to {end_date})',
+            fontsize=15, fontweight='bold'
+        )
+
+        ax1.plot(equity.index, equity['portfolio'],
+                 label=f'Adaptive Rotation ({equity["portfolio"].iloc[-1]:.2f}x)',
+                 color='#2563eb', linewidth=2)
+        if 'SPY' in equity.columns:
+            ax1.plot(equity.index, equity['SPY'],
+                     label=f'SPY ({equity["SPY"].iloc[-1]:.2f}x)',
+                     color='#6b7280', linewidth=1.2, alpha=0.8)
+        if 'QQQ' in equity.columns:
+            ax1.plot(equity.index, equity['QQQ'],
+                     label=f'QQQ ({equity["QQQ"].iloc[-1]:.2f}x)',
+                     color='#f59e0b', linewidth=1.2, alpha=0.8)
+        ax1.set_ylabel('Growth of $1', fontsize=12)
+        ax1.legend(fontsize=11, loc='upper left')
+        ax1.grid(True, alpha=0.3)
+
+        ax2.fill_between(equity.index, drawdown.values, 0, color='#ef4444', alpha=0.4)
+        ax2.plot(equity.index, drawdown.values, color='#ef4444', linewidth=0.8)
+        ax2.set_ylabel('Drawdown', fontsize=12)
+        ax2.grid(True, alpha=0.3)
+        ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.0%}'))
+
+        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+        plt.xticks(rotation=45)
+
+        stats_text = (
+            f'Ann. Return: {ann_ret:.1%}  |  Sharpe: {sharpe:.2f}  |  '
+            f'Max DD: {max_dd:.1%}  |  Calmar: {calmar:.2f}'
+        )
+        fig.text(0.5, 0.02, stats_text, ha='center', fontsize=11,
+                 bbox=dict(boxstyle='round,pad=0.4', facecolor='#f0f9ff', edgecolor='#bfdbfe'))
+
+        plt.tight_layout(rect=[0, 0.05, 1, 0.96])
+
+        output_path = Path(output_dir)
+        chart_file = output_path / f"backtest_{start_date}_to_{end_date}.png"
+        plt.savefig(chart_file, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"\nEquity curve saved to: {chart_file}")
+    except ImportError:
+        print("\n(matplotlib not installed — skipping chart generation)")
 
 
 def main():
