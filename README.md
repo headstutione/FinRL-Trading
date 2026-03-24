@@ -63,23 +63,29 @@ where $\mathcal{S}$ denotes stock selection, $\mathcal{A}$ portfolio allocation,
 ```
 finrl-trading/
 ├── src/
-│   ├── config/                          # Pydantic settings + .env management
-│   ├── data/                            # Multi-source data (Yahoo / FMP / WRDS)
-│   ├── backtest/                        # bt-powered backtesting engine
-│   ├── strategies/
-│   │   ├── base_strategy.py             # Weight-centric strategy interface
-│   │   ├── ml_strategy.py               # ML stock selection (Random Forest)
-│   │   ├── adaptive_rotation/           # Adaptive Multi-Asset Rotation Strategy
-│   │   ├── fundamental_portfolio_drl.py # DRL portfolio allocation
-│   │   └── run_adaptive_rotation_strategy.py
-│   └── trading/
-│       ├── alpaca_manager.py            # Multi-account Alpaca client
-│       ├── trade_executor.py            # Order routing + risk controls
-│       └── performance_analyzer.py      # Real-time P&L tracking
-├── deploy.sh                            # One-command deploy (backtest / paper)
+│   ├── config/                     # ⚙️  Centralized configuration management
+│   │   └── settings.py             #     Pydantic-based settings + environment variables
+│   ├── data/                       # 🗄️  Data acquisition and processing
+│   │   ├── data_fetcher.py         #     Multi-source integration (Yahoo / FMP / WRDS)
+│   │   ├── data_processor.py       #     Feature engineering & data cleaning
+│   │   └── data_store.py           #     SQLite persistence with caching
+│   ├── backtest/                   # 📊  Backtesting engine
+│   │   └── backtest_engine.py      #     bt-powered engine with benchmark comparison
+│   ├── strategies/                 # 🤖  Trading strategies
+│   │   ├── base_strategy.py        #     Abstract strategy framework
+│   │   └── ml_strategy.py          #     Random Forest stock selection
+│   ├── trading/                    # 💰  Live trading execution
+│   │   ├── alpaca_manager.py       #     Alpaca API integration (multi-account)
+│   │   ├── trade_executor.py       #     Order management & risk controls
+│   │   └── performance_analyzer.py #     Real-time P&L tracking
+│   └── main.py                     # 🚀  CLI entry point
 ├── examples/
-│   └── FinRL_Full_Workflow.ipynb        # End-to-end tutorial
-└── requirements.txt
+│   ├── FinRL_Full_Workflow.ipynb   # 📓  Complete workflow tutorial (start here!)
+│   └── README.md
+├── data/                           # Runtime data storage (gitignored)
+├── logs/                           # Application logs (gitignored)
+├── requirements.txt
+└── setup.py
 ```
 
 ---
