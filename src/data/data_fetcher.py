@@ -1314,6 +1314,39 @@ def fetch_nasdaq100_tickers(preferred_source='FMP') -> pd.DataFrame:
     return df
 
 
+def get_sp500_members_at_date(target_date: str,
+                              csv_path: str = None) -> set:
+    """Return the set of SP500 tickers as of *target_date*.
+
+    Uses the historical constituents CSV (one row per snapshot date).
+    Picks the latest snapshot whose date <= target_date.
+    """
+    if csv_path is None:
+        csv_path = os.path.join(project_root, "data", "sp500_historical_constituents.csv")
+    df = pd.read_csv(csv_path)
+    df['date'] = pd.to_datetime(df['date'])
+    target = pd.to_datetime(target_date)
+    valid = df[df['date'] <= target]
+    if valid.empty:
+        return set()
+    row = valid.iloc[-1]
+    return set(row['tickers'].split(','))
+
+
+def get_all_historical_sp500_tickers(csv_path: str = None,
+                                     start_date: str = "2015-01-01") -> set:
+    """Return every ticker that has ever been in SP500 since *start_date*."""
+    if csv_path is None:
+        csv_path = os.path.join(project_root, "data", "sp500_historical_constituents.csv")
+    df = pd.read_csv(csv_path)
+    df['date'] = pd.to_datetime(df['date'])
+    df = df[df['date'] >= pd.to_datetime(start_date)]
+    all_tickers: set = set()
+    for tickers_str in df['tickers']:
+        all_tickers.update(tickers_str.split(','))
+    return all_tickers
+
+
 def fetch_fundamental_data(tickers: List[str] | pd.DataFrame, start_date: str, end_date: str,
                           align_quarter_dates: bool = False, preferred_source='FMP') -> pd.DataFrame:
     """

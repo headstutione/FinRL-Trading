@@ -12,7 +12,10 @@ if project_root not in sys.path:
     sys.path.insert(0, os.path.join(project_root, "src"))
 
 import pandas as pd
-from data.data_fetcher import fetch_fundamental_data, fetch_sp500_tickers, fetch_nasdaq100_tickers
+from data.data_fetcher import (
+    fetch_fundamental_data, fetch_sp500_tickers, fetch_nasdaq100_tickers,
+    get_all_historical_sp500_tickers,
+)
 from data.data_store import get_data_store
 
 
@@ -25,20 +28,32 @@ def main():
     parser.add_argument("--limit", type=int, default=10000, help="Universe cap")
     parser.add_argument("--preferred-source", default="FMP")
     parser.add_argument("--output-csv", default=None, help="Also save to CSV")
+    parser.add_argument("--survivorship-free", action="store_true",
+                        help="Use all historical SP500 tickers (not just current) to avoid survivorship bias")
     args = parser.parse_args()
 
     # 1. Get tickers
-    print(f"Fetching {args.universe.upper()} universe ...")
-    if args.universe == "nasdaq100":
-        tickers = fetch_nasdaq100_tickers(preferred_source=args.preferred_source)
+    if args.survivorship_free:
+        print("Survivorship-free mode: collecting ALL historical SP500 tickers ...")
+        all_hist = get_all_historical_sp500_tickers(start_date=args.start_date)
+        # Also include current SP500 to ensure nothing is missed
+        current = fetch_sp500_tickers(preferred_source=args.preferred_source)
+        current_set = set(current["tickers"].tolist()) if current is not None else set()
+        combined = sorted(all_hist | current_set)
+        tickers = pd.DataFrame({"tickers": combined, "sectors": ""})
+        print(f"Universe: {len(tickers)} tickers (historical: {len(all_hist)}, current: {len(current_set)})")
     else:
-        tickers = fetch_sp500_tickers(preferred_source=args.preferred_source)
+        print(f"Fetching {args.universe.upper()} universe ...")
+        if args.universe == "nasdaq100":
+            tickers = fetch_nasdaq100_tickers(preferred_source=args.preferred_source)
+        else:
+            tickers = fetch_sp500_tickers(preferred_source=args.preferred_source)
 
-    if tickers is None or len(tickers) == 0:
-        raise ValueError(f"Failed to fetch {args.universe} tickers")
-    if args.limit > 0:
-        tickers = tickers.head(args.limit)
-    print(f"Universe: {len(tickers)} tickers")
+        if tickers is None or len(tickers) == 0:
+            raise ValueError(f"Failed to fetch {args.universe} tickers")
+        if args.limit > 0:
+            tickers = tickers.head(args.limit)
+        print(f"Universe: {len(tickers)} tickers")
 
     # 2. Fetch fundamental data
     print(f"Fetching fundamentals {args.start_date} ~ {args.end_date} ...")
@@ -66,7 +81,7 @@ def main():
 
     # 5. Summary
     print(f"\nSummary:")
-    print(f"  Universe: {args.universe}")
+    print(f"  Universe: {'survivorship-free' if args.survivorship_free else args.universe}")
     print(f"  Tickers: {df['tic'].nunique()}")
     print(f"  Date range: {df['datadate'].min()} ~ {df['datadate'].max()}")
     print(f"  Total records: {len(df)}")
