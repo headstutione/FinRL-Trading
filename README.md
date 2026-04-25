@@ -40,11 +40,11 @@
 > - CVaR confidence level set to 0.95 in my experiments (upstream default is 0.99 — found it too conservative for weekly rebalancing)
 > - Alpaca paper trading key stored in `.env.local`, never commit it
 > - Remember to sync upstream before running backtests: `git fetch upstream && git merge upstream/main`
+> - **2025-06-10:** Weekly rebalancing with CVaR=0.95 is outperforming daily on SPY universe (2022–2024 backtest). Sharpe ~1.31 vs ~1.09. Worth digging into turnover costs next.
+> - Transaction cost assumption in my backtests: 5bps per trade (Alpaca is technically zero-commission but slippage matters)
 
 ## About
 
 **FinRL-X** is a next-generation, **AI-native** quantitative trading infrastructure that redefines how researchers and practitioners build, test, and deploy algorithmic trading strategies. 
 
-Introduced in our paper *"FinRL-X: An AI-Native Modular Infrastructure for Quantitative Trading"* ([arXiv:2603.21330](https://arxiv.org/abs/2603.21330)), FinRL-X succeeds the original [FinRL](https://github.com/AI4Finance-Foundation/FinRL) framework with a fully modernized architecture designed for the LLM and agentic AI era.
-
-> FinRL-X is **not just a library** — it is a full-stack trading platform engineered around modularity, reproducibility, and production-readiness, supporting everything from ML-based stock selection and professional backtesting to live brokerage executio
+Introduced in our paper *"FinRL-X: An AI-Native Modular Infrastructure for Quantitative Trading"* ([arXiv:2603.21330](https://arxiv.org/abs/2603.21330)), FinRL-X succeeds the original [FinRL](https://github.com/AI4Finance-Foundation/FinRL) framework wit
